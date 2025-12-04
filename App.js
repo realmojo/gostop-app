@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView, Alert, Animated } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView, Alert, Animated, Modal } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
 import { initialGameState, playTurn, handleGoStopDecision } from './src/utils/gameEngine';
 import Card from './src/components/Card';
@@ -8,7 +8,9 @@ import { loadSounds, playSound } from './src/utils/SoundManager';
 export default function App() {
   const [game, setGame] = useState(null);
   const [animatingCard, setAnimatingCard] = useState(null);
+  const [animatingDeckCard, setAnimatingDeckCard] = useState(null);
   const cardAnimation = useRef(new Animated.Value(0)).current;
+  const deckCardAnimation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadSounds();
@@ -57,7 +59,14 @@ export default function App() {
     } else if (game && game.gameStatus === 'ended') {
         let message = "게임이 종료되었습니다.";
         if (game.winner) {
-            message = `${game.winner === 'player' ? '당신' : '컴퓨터'}의 승리!`;
+            const winnerName = game.winner === 'player' ? '당신' : '컴퓨터';
+            const winnerScore = game.scores[game.winner];
+            message = `${winnerName}의 승리!\n점수: ${winnerScore}점`;
+            
+            // 총통이나 특수 상황 메시지 추가
+            if (game.lastAction && game.lastAction.includes('총통')) {
+                message = `🎉 ${game.lastAction}\n\n${winnerName}의 승리!\n점수: ${winnerScore}점`;
+            }
         } else {
             message = "무승부 (나가리)";
         }
@@ -74,12 +83,63 @@ export default function App() {
     setGame(newGameState);
   };
 
+  const handleCardSelection = (selectedCardId) => {
+    if (!game || !game.pendingPlay) return;
+    
+    // 선택된 카드로 다시 플레이
+    const { cardIndex, options } = game.pendingPlay;
+    const newOptions = { ...options, selectedCardId };
+    
+    // 게임 로직 실행
+    const newGameState = playTurn(game, cardIndex, newOptions);
+    
+    // 덱 카드 애니메이션 처리
+    if (newGameState?.remainingDeck && game?.remainingDeck && newGameState.remainingDeck.length < game.remainingDeck.length) {
+      const flippedCard = game.remainingDeck[0];
+      
+      setAnimatingDeckCard({ card: flippedCard });
+      deckCardAnimation.setValue(0);
+      
+      Animated.sequence([
+        Animated.delay(200),
+        Animated.spring(deckCardAnimation, {
+          toValue: 1,
+          tension: 50,
+          friction: 8,
+          useNativeDriver: true,
+        })
+      ]).start(() => {
+        setAnimatingDeckCard(null);
+        setGame(newGameState);
+      });
+    } else {
+      setGame(newGameState);
+    }
+  };
+
+  const handleGoStop = (isGo) => {
+    if (!game) return;
+    const newGameState = handleGoStopDecision(game, isGo);
+    setGame(newGameState);
+  };
+
   const handlePlayCard = (index, options = {}) => {
     if (!game || game.gameStatus !== 'playing') return;
+    
+    const currentHand = game.currentTurn === 'player' ? game.playerHand : game.computerHand;
+    if (!currentHand || index >= currentHand.length) return;
 
     // 플레이어 턴일 때만 사용자 입력 검증
     if (game.currentTurn === 'player' && !options.isBomb && !options.isShake) {
         const card = game.playerHand[index];
+        if (!card) return;
+        
+        // 보너스 카드는 특수 처리 (month가 0)
+        if (card.month === 0) {
+          processPlay(index, options);
+          return;
+        }
+        
         const sameMonthCards = game.playerHand.filter(c => c.month === card.month);
         const fieldMatch = game.field.find(c => c.month === card.month);
 
@@ -108,7 +168,12 @@ export default function App() {
   const processPlay = (index, options) => {
     const cardToPlay = game.currentTurn === 'player' ? game.playerHand[index] : game.computerHand[index];
     
-    // 애니메이션 시작
+    if (!cardToPlay) {
+      console.error('Card not found at index:', index);
+      return;
+    }
+    
+    // 1단계: 손패 카드 애니메이션 시작
     setAnimatingCard({ card: cardToPlay, isPlayer: game.currentTurn === 'player' });
     cardAnimation.setValue(0);
     
@@ -118,11 +183,45 @@ export default function App() {
       friction: 7,
       useNativeDriver: true,
     }).start(() => {
-      // 애니메이션 완료 후 실제 게임 로직 실행
+      // 손패 애니메이션 완료
       setAnimatingCard(null);
       playSound('play');
+      
+      // 게임 로직 실행하여 덱 카드 확인
       const newGameState = playTurn(game, index, options);
-      setGame(newGameState);
+      
+      // 선택이 필요한 경우 모달 표시
+      if (newGameState.needsSelection) {
+        setGame(newGameState);
+        return;
+      }
+      
+      // 2단계: 덱에서 뒤집힌 카드가 있으면 애니메이션 표시
+      if (newGameState.remainingDeck.length < game.remainingDeck.length) {
+        // 덱에서 카드가 뒤집혔음
+        const deckCardIndex = game.remainingDeck.length - newGameState.remainingDeck.length - 1;
+        const flippedCard = game.remainingDeck[0]; // 맨 위 카드가 뒤집힘
+        
+        setAnimatingDeckCard({ card: flippedCard });
+        deckCardAnimation.setValue(0);
+        
+        Animated.sequence([
+          Animated.delay(200), // 잠깐 대기
+          Animated.spring(deckCardAnimation, {
+            toValue: 1,
+            tension: 50,
+            friction: 8,
+            useNativeDriver: true,
+          })
+        ]).start(() => {
+          // 덱 카드 애니메이션 완료
+          setAnimatingDeckCard(null);
+          setGame(newGameState);
+        });
+      } else {
+        // 덱 카드가 없으면 바로 상태 업데이트
+        setGame(newGameState);
+      }
     });
   };
 
@@ -133,6 +232,7 @@ export default function App() {
     const ribbons = cards.filter(c => c.type === 'ribbon').sort((a, b) => a.month - b.month);
     const junks = cards.filter(c => c.type === 'junk').sort((a, b) => a.month - b.month);
     const doubleJunks = cards.filter(c => c.type === 'double_junk').sort((a, b) => a.month - b.month);
+    const bonusJunks = cards.filter(c => c.type === 'bonus_junk_2' || c.type === 'bonus_junk_3').sort((a, b) => a.id - b.id);
     
     const renderCardGroup = (groupCards) => (
       <View style={styles.cardGroup}>
@@ -164,11 +264,11 @@ export default function App() {
           </View>
         </View>
         
-        {/* 피 + 쌍피 (5) */}
+        {/* 피 + 쌍피 + 보너스 피 (5) */}
         <View style={[styles.capturedColumn, { flex: 5 }]}>
           {/* <Text style={styles.columnTitle}>피</Text> */}
           <View style={styles.cardGroup}>
-            {[...junks, ...doubleJunks].map((card, index) => (
+            {[...junks, ...doubleJunks, ...bonusJunks].map((card, index) => (
               <View key={index} style={{ marginRight: -35, marginBottom: -15 }}>
                 <Card id={card.id} month={card.month} type={card.type} scale={0.5} />
               </View>
@@ -219,13 +319,53 @@ export default function App() {
 
         {/* Field Section */}
         <View style={[styles.section, styles.fieldSection]}>
-          <Text style={styles.sectionTitle}>Field ({game.field.length})</Text>
           <View style={styles.fieldGrid}>
-            {game.field.map((card, index) => (
-              <View key={index} style={{ margin: 2 }}>
-                <Card id={card.id} month={card.month} type={card.type} />
-              </View>
-            ))}
+            {(() => {
+              // 카드를 월별로 그룹화
+              const cardsByMonth = game.field.reduce((acc, card) => {
+                if (!acc[card.month]) {
+                  acc[card.month] = [];
+                }
+                acc[card.month].push(card);
+                return acc;
+              }, {});
+
+              // 월 순서대로 정렬
+              const sortedMonths = Object.keys(cardsByMonth).sort((a, b) => parseInt(a) - parseInt(b));
+
+              return sortedMonths.map((month) => {
+                const cards = cardsByMonth[month];
+                
+                // 같은 월의 카드가 3장 미만이면 일반 표시 (각각 따로)
+                if (cards.length < 3) {
+                  return cards.map((card) => (
+                    <View key={card.id} style={{ margin: 2 }}>
+                      <Card id={card.id} month={card.month} type={card.type} />
+                    </View>
+                  ));
+                }
+                
+                // 같은 월의 카드가 3장 이상이면 겹쳐서 표시
+                return (
+                  <View key={month} style={styles.stackedCardGroup}>
+                    {cards.map((card, index) => (
+                      <View 
+                        key={card.id} 
+                        style={[
+                          styles.stackedCard,
+                          { 
+                            marginLeft: index === 0 ? 0 : -40,
+                            zIndex: index,
+                          }
+                        ]}
+                      >
+                        <Card id={card.id} month={card.month} type={card.type} />
+                      </View>
+                    ))}
+                  </View>
+                );
+              });
+            })()}
           </View>
         </View>
 
@@ -254,7 +394,7 @@ export default function App() {
         </View>
       </View>
       
-      {/* 애니메이션 카드 오버레이 */}
+      {/* 애니메이션 카드 오버레이 - 손패 */}
       {animatingCard && (
         <Animated.View
           style={[
@@ -262,31 +402,19 @@ export default function App() {
             {
               opacity: cardAnimation.interpolate({
                 inputRange: [0, 0.2, 1],
-                outputRange: [1, 1, 0.8],
+                outputRange: [1, 1, 0],
               }),
               transform: [
                 {
                   translateY: cardAnimation.interpolate({
                     inputRange: [0, 1],
-                    outputRange: animatingCard.isPlayer ? [200, 0] : [-200, 0], // 플레이어면 아래에서, 컴퓨터면 위에서
-                  }),
-                },
-                {
-                  translateX: cardAnimation.interpolate({
-                    inputRange: [0, 0.5, 1],
-                    outputRange: [0, 20, 0], // 약간의 곡선 효과
-                  }),
-                },
-                {
-                  rotate: cardAnimation.interpolate({
-                    inputRange: [0, 0.5, 1],
-                    outputRange: ['0deg', '5deg', '0deg'], // 회전 효과
+                    outputRange: animatingCard.isPlayer ? [100, -100] : [-100, 100], // 플레이어면 위로, 컴퓨터면 아래로 (Field 방향)
                   }),
                 },
                 {
                   scale: cardAnimation.interpolate({
                     inputRange: [0, 0.5, 1],
-                    outputRange: [1, 1.1, 1], // 살짝 커졌다 원래대로
+                    outputRange: [1, 1.2, 0.9], // 커졌다가 작아짐
                   }),
                 },
               ],
@@ -296,6 +424,98 @@ export default function App() {
           <Card id={animatingCard.card.id} month={animatingCard.card.month} type={animatingCard.card.type} />
         </Animated.View>
       )}
+      
+      {/* 애니메이션 카드 오버레이 - 덱 카드 */}
+      {animatingDeckCard && (
+        <Animated.View
+          style={[
+            styles.animatedCardOverlay,
+            {
+              opacity: deckCardAnimation.interpolate({
+                inputRange: [0, 0.5, 1],
+                outputRange: [0, 1, 1],
+              }),
+              transform: [
+                {
+                  scale: deckCardAnimation.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: [0.3, 1.2, 1], // 작게 시작해서 커졌다가 정상 크기로
+                  }),
+                },
+                {
+                  rotateY: deckCardAnimation.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: ['90deg', '0deg', '0deg'], // 뒤집히는 효과
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Card id={animatingDeckCard.card.id} month={animatingDeckCard.card.month} type={animatingDeckCard.card.type} />
+        </Animated.View>
+      )}
+      
+      {/* 카드 선택 모달 */}
+      <Modal
+        visible={game?.needsSelection || false}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>획득할 카드를 선택하세요</Text>
+            <View style={styles.cardChoicesContainer}>
+              {game?.selectionChoices?.map((card, index) => (
+                <TouchableOpacity
+                  key={card.id}
+                  style={styles.cardChoice}
+                  onPress={() => handleCardSelection(card.id)}
+                  activeOpacity={0.7}
+                >
+                  <Card id={card.id} month={card.month} type={card.type} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 고/스톱 선택 모달 */}
+      <Modal
+        visible={game?.gameStatus === 'waitingForDecision'}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>고? 스톱?</Text>
+            <Text style={styles.modalSubtitle}>
+              현재 점수: {game?.scores?.player}점
+              {game?.goCount?.player > 0 ? ` (${game.goCount.player}고 중)` : ''}
+            </Text>
+            <View style={styles.decisionButtonsContainer}>
+              <TouchableOpacity
+                style={[styles.decisionButton, styles.goButton]}
+                onPress={() => handleGoStop(true)}
+              >
+                <Text style={styles.decisionButtonText}>GO (고)</Text>
+                <Text style={styles.decisionButtonSubText}>계속하기</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.decisionButton, styles.stopButton]}
+                onPress={() => handleGoStop(false)}
+              >
+                <Text style={styles.decisionButtonText}>STOP (스톱)</Text>
+                <Text style={styles.decisionButtonSubText}>게임 종료</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       
       <StatusBar style="light" />
     </SafeAreaView>
@@ -409,6 +629,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
   },
+  stackedCardGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 2,
+  },
+  stackedCard: {
+    position: 'relative',
+  },
   animatedCardOverlay: {
     position: 'absolute',
     top: '50%',
@@ -429,5 +657,78 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#34495e',
+    borderRadius: 15,
+    padding: 25,
+    alignItems: 'center',
+    minWidth: 300,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  modalTitle: {
+    color: '#ecf0f1',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  cardChoicesContainer: {
+    flexDirection: 'row',
+    gap: 20,
+    justifyContent: 'center',
+  },
+  cardChoice: {
+    padding: 5,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 2,
+    borderColor: '#f39c12',
+  },
+  modalSubtitle: {
+    color: '#bdc3c7',
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  decisionButtonsContainer: {
+    flexDirection: 'row',
+    gap: 15,
+    justifyContent: 'center',
+    width: '100%',
+  },
+  decisionButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
+  },
+  goButton: {
+    backgroundColor: '#2ecc71',
+  },
+  stopButton: {
+    backgroundColor: '#e74c3c',
+  },
+  decisionButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  decisionButtonSubText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    marginTop: 4,
   },
 });

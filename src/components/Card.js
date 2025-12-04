@@ -2,8 +2,8 @@ import React from 'react';
 import { View, Image, StyleSheet, Text } from 'react-native';
 
 // 스프라이트 시트의 전체 크기와 개별 카드의 크기를 정의합니다.
-// 생성된 이미지의 비율에 맞춰 조정이 필요할 수 있습니다.
-// 가로 8장, 세로 6장으로 가정합니다.
+// 새로 처리된 이미지: 840x1002 (간격 제거됨)
+// 가로 8장, 세로 6장
 const SPRITE_COLS = 8;
 const SPRITE_ROWS = 6;
 
@@ -11,18 +11,30 @@ const SPRITE_ROWS = 6;
 export const CARD_WIDTH = 50;
 export const CARD_HEIGHT = 80;
 
-// 원본 스프라이트 이미지의 예상 크기 (가정값, 실제 이미지에 맞춰 비율 조정 필요)
-// 고해상도 이미지를 가정하여 넉넉하게 잡습니다.
-const ORIGINAL_CARD_WIDTH = 100; 
-const ORIGINAL_CARD_HEIGHT = 160;
-const TOTAL_WIDTH = ORIGINAL_CARD_WIDTH * SPRITE_COLS;
-const TOTAL_HEIGHT = ORIGINAL_CARD_HEIGHT * SPRITE_ROWS;
+// 원본 스프라이트 이미지의 실제 크기
+// 새 이미지: 840x1002, 각 카드: 105x167
+const ORIGINAL_CARD_WIDTH = 105; 
+const ORIGINAL_CARD_HEIGHT = 167;
+const TOTAL_WIDTH = ORIGINAL_CARD_WIDTH * SPRITE_COLS;  // 840
+const TOTAL_HEIGHT = ORIGINAL_CARD_HEIGHT * SPRITE_ROWS; // 1002
+
 
 const Card = ({ id, month, type, isBack = false, style, scale = 1 }) => {
   if (isBack) {
     return (
       <View style={[styles.cardContainer, styles.cardBack, style, { transform: [{ scale }] }]}>
         <View style={styles.backPattern} />
+      </View>
+    );
+  }
+
+  // 보너스 카드 렌더링
+  if (type === 'bonus_junk_2' || type === 'bonus_junk_3') {
+    const points = type === 'bonus_junk_2' ? '2' : '3';
+    return (
+      <View style={[styles.cardContainer, styles.bonusCard, style, { transform: [{ scale }] }]}>
+        <Text style={styles.bonusText}>보너스</Text>
+        <Text style={styles.bonusPoints}>{points}점</Text>
       </View>
     );
   }
@@ -79,6 +91,30 @@ const styles = StyleSheet.create({
     height: '80%',
     backgroundColor: '#c0392b',
     borderRadius: 2,
+  },
+  bonusCard: {
+    backgroundColor: '#f39c12',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#f1c40f',
+  },
+  bonusText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  bonusPoints: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   debugText: {
     position: 'absolute',

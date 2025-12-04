@@ -4,6 +4,8 @@ export const CARD_TYPES = {
   RIBBON: 'ribbon', // 띠
   JUNK: 'junk',     // 피
   DOUBLE_JUNK: 'double_junk', // 쌍피
+  BONUS_JUNK_2: 'bonus_junk_2', // 보너스 피 2점
+  BONUS_JUNK_3: 'bonus_junk_3', // 보너스 피 3점
 };
 
 export const CARDS = [
@@ -68,4 +70,7 @@ export const CARDS = [
   { id: 45, month: 12, type: CARD_TYPES.ANIMAL, name: '비 열끗' },
   { id: 46, month: 12, type: CARD_TYPES.RIBBON, name: '비 띠' },
   { id: 47, month: 12, type: CARD_TYPES.DOUBLE_JUNK, name: '비 쌍피' },
+  // 보너스 카드
+  { id: 48, month: 0, type: CARD_TYPES.BONUS_JUNK_2, name: '보너스 피 2점' },
+  { id: 49, month: 0, type: CARD_TYPES.BONUS_JUNK_3, name: '보너스 피 3점' },
 ];
